@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from pytorch_transformers.modeling_bert import BertModel
+from pytorch_transformers.modeling_auto import AutoModel
 
 from snorkel.classification import DictDataset, DictDataLoader
 from snorkel.classification import Operation
@@ -22,7 +22,7 @@ from snorkel.classification.training.loggers.log_manager import LogManagerConfig
 import utils.Classification_Task_Data_Handler as Classification_Task_Data_Handler
 import utils.Tagging_Task_Data_Handler as Tagging_Task_Data_Handler
 
-from modules.SnorkelFriendlyBert import SnorkelFriendlyBert
+from modules.SnorkelFriendlyLanguageModel import SnorkelFriendlyLanguageModel
 from modules.ClassificationLinearLayer import ClassificationLinearLayer
 from modules.TaggingLinearLayer import TaggingLinearLayer
 
@@ -34,10 +34,12 @@ import argparse
 parser=argparse.ArgumentParser()
 parser.add_argument('--max_seq_length', default="512", help='Max size of the input in tokens')
 parser.add_argument('--batch_size', default="32", help='Batch size of every dataset')
+parser.add_argument('--language_model_type', default="bert-base-uncased", help='Type of language model used from pytorch_transformers')
 args = parser.parse_args()
 
 MAX_SEQ_LENGTH = int(args.max_seq_length)
 BATCH_SIZE = int(args.batch_size)
+LANGUAGE_MODEL_TYPE = args.language_model_type
 
 task_type_function_mapping = {
     "Classification_Tasks": {
@@ -63,15 +65,15 @@ dataloaders = []
 # Create empty list to hold every Task object
 tasks = []
 
-# Define the shared BERT layer to be used across tasks, and set the max seq length for the model.
-shared_BERT_model = BertModel.from_pretrained('bert-base-uncased')
-shared_BERT_model.config.max_position_embeddings = MAX_SEQ_LENGTH
+# Define the shared language model layer to be used across tasks, and set the max seq length for the model.
+shared_language_model = AutoModel.from_pretrained(LANGUAGE_MODEL_TYPE)
+#shared_language_model.config.max_position_embeddings = MAX_SEQ_LENGTH
 
-# Confirm BERTs hidden layer size
-hidden_layer_size = 768
+# Confirm language_models hidden layer size
+hidden_layer_size = shared_language_model.config.hidden_size
 
-# Make a module to contain the BERT module but can take the inputs of the Xs
-bert_module = SnorkelFriendlyBert(bert_model=shared_BERT_model)
+# Make a module to contain the language_model module but can take the inputs of the Xs
+language_model_module = SnorkelFriendlyLanguageModel(language_model=shared_language_model)
 
 # Iterate through all task types
 for task_type in ["Classification_Tasks", "Tagging_Tasks"]:
@@ -91,7 +93,7 @@ for task_type in ["Classification_Tasks", "Tagging_Tasks"]:
         task_type_specific_data_handler = task_type_function_mapping[task_type]["data_handler"]
 
         # Read data from given .tsv file and make it into structured and vectorized inputs/outputs
-        split_datasets, output_label_to_int_dict = task_type_specific_data_handler.get_inputs_and_outputs(task_name, cwd, seq_len=MAX_SEQ_LENGTH)
+        split_datasets, output_label_to_int_dict = task_type_specific_data_handler.get_inputs_and_outputs(task_name, cwd, seq_len=MAX_SEQ_LENGTH, language_model_type=LANGUAGE_MODEL_TYPE)
 
         # Get splits of datasets
         train_dataset = split_datasets["train"]
@@ -134,16 +136,16 @@ for task_type in ["Classification_Tasks", "Tagging_Tasks"]:
         task_head_name = f"{task_name}_head_module"
 
         # The module pool contains all the modules this task uses
-        module_pool = nn.ModuleDict({"bert_module": bert_module, task_head_name: head_module})
+        module_pool = nn.ModuleDict({"language_model_module": language_model_module, task_head_name: head_module})
 
-        # Operation with same name to all other tasks as it contains the shared bert_module
+        # Operation with same name to all other tasks as it contains the shared language_model_module
         op1 = Operation(
-            name="bert_module", module_name="bert_module", inputs=[("_input_", task_data_name)]
+            name="language_model_module", module_name="language_model_module", inputs=[("_input_", task_data_name)]
         )
 
-        # "Pass the output of op1 (the BERT module) as input to the head_module"
+        # "Pass the output of op1 (the language_model module) as input to the head_module"
         op2 = Operation(
-            name=task_head_name, module_name=task_head_name, inputs=["bert_module"]
+            name=task_head_name, module_name=task_head_name, inputs=["language_model_module"]
         )
 
         op_sequence = [op1, op2]
@@ -181,9 +183,6 @@ trainer = Trainer(**trainer_config)
 
 # Train model using above settings on the datasets linked
 trainer.fit(model, dataloaders)
-
-# Output training stats of model
-trainer.log_writer.write_log("output_statistics.json")
 
 # Score model using test set and print
 model_scores = model.score(dataloaders)
