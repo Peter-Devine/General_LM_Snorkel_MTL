@@ -34,12 +34,22 @@ import argparse
 parser=argparse.ArgumentParser()
 parser.add_argument('--max_seq_length', default="512", help='Max size of the input in tokens')
 parser.add_argument('--batch_size', default="32", help='Batch size of every dataset')
+parser.add_argument('--epochs', default="20", help='Number of epochs to train for')
 parser.add_argument('--language_model_type', default="bert-base-uncased", help='Type of language model used from pytorch_transformers')
+parser.add_argument('--optimizer', default="adam", help='Optimiser type ("adam", "adamax", or "sgd")')
+parser.add_argument('--lr', default="0.00002", help='Learning rate')
+parser.add_argument('--l2', default="0.01", help='Weight decay')
+parser.add_argument('--lr_schedule', default="constant", help='Learning rate decay schedule')
 args = parser.parse_args()
 
 MAX_SEQ_LENGTH = int(args.max_seq_length)
 BATCH_SIZE = int(args.batch_size)
+NUM_EPOCHS = int(args.epochs)
 LANGUAGE_MODEL_TYPE = args.language_model_type
+OPTIMIZER = args.optimizer
+LR = float(args.lr)
+L2 = float(args.l2)
+LR_SCHEDULE = args.lr_schedule
 
 task_type_function_mapping = {
     "Classification_Tasks": {
@@ -171,11 +181,14 @@ model = MultitaskClassifier(tasks)
 # Set out trainer settings - I.e. how the model will train
 trainer_config = {
     "progress_bar": True,
-    "n_epochs": 2,
-    "lr": 0.02,
+    "n_epochs": NUM_EPOCHS,
+    "lr": LR,
+    "l2": L2,
     "logging": True,
     "log_writer": "json",
     "checkpointing": True,
+    "optimizer": OPTIMIZER,
+    "lr_scheduler": LR_SCHEDULE
 }
 
 # Create trainer object using above settings
